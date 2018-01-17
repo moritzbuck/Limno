@@ -1,0 +1,169 @@
+
+import os
+from glob import glob
+from os.path import join as pjoin
+
+
+workdir : "/home/moritz/people/0010_Pauline/"
+
+TEMP_DIR = '/scratch/'
+TRIMMOMATIC_HOME = '/sw/apps/bioinfo/trimmomatic/0.36/rackham/'
+TRIMMOMATIC_JAR_PROGRAM = "trimmomatic.jar"
+THREADS = 20
+MAX_MEM = '128g'
+
+trimmomatic_config = {
+    	'options' : "-phred33",
+        'processing_options' : "ILLUMINACLIP:" + TRIMMOMATIC_HOME + "/adapters/TruSeq3-PE.fa:2:30:10 LEADING:3 TRAILING:3 SLIDINGWINDOW:4:15 MINLEN:36",
+        'cmd' : "java -Xmx" + MAX_MEM + " -Djava.io.tmpdir=" + TEMP_DIR +  " -jar " + os.path.join(TRIMMOMATIC_HOME, TRIMMOMATIC_JAR_PROGRAM) + " PE ",
+}
+
+def find_fastq(wildcards):
+    path = '0000_raws/0100_reads/{id}/'.format(id=wildcards.sample)
+    result = [y for x in os.walk(path) for y in glob(os.path.join(x[0], '*.fastq.gz'))]
+    return result
+
+def all_samples():
+    path = "1000_processed_reads/"
+    samples = [d for d in os.listdir(path) if os.path.isdir(pjoin(path,d)) ]
+    return samples
+
+def all_dones(wildcards):
+    path = '0000_raws/0100_reads/'
+    result = [pjoin("1000_processed_reads/",s,"done") for s in os.listdir(path) if os.path.isdir(pjoin(path,s)) ]
+    return result
+
+# rule all:
+#     """ Generate all """
+#     input : 'big_table.csv'
+
+
+rule fastqc:
+    input :  find_fastq
+    output : "1000_processed_reads/{sample}/reads/fastqc"
+    threads : THREADS
+    shell:
+        """
+        fastqc -t {threads} -o {output} {input}
+        """
+
+
+rule trimmomatic:
+    """ QCing and cleaning reads """
+    params : cmd = trimmomatic_config['cmd'],
+             options = trimmomatic_config['options'],
+             processing_options = trimmomatic_config['processing_options'],
+             temp_folder = TEMP_DIR
+    input :  find_fastq
+    output : read1 = "1000_processed_reads/{sample}/reads/trimmomatic/{sample}_1P.fastq.gz",
+             read2 = "1000_processed_reads/{sample}/reads/trimmomatic/{sample}_2P.fastq.gz",
+             read1U = "1000_processed_reads/{sample}/reads/trimmomatic/{sample}_1U.fastq.gz",
+             read2U = "1000_processed_reads/{sample}/reads/trimmomatic/{sample}_2U.fastq.gz",
+    threads : THREADS
+    log : "1000_processed_reads/{sample}/reads/trimmomatic/{sample}.log"
+    shell:
+        """
+        unpigz -c `echo {input} | tr ' ' '\n' | grep "_R1_"`  >  {params.temp_folder}/temp_R1.fastq
+        unpigz -c `echo {input} | tr ' ' '\n' | grep "_R2_"` >  {params.temp_folder}/temp_R2.fastq
+
+        {params.cmd} {params.options} {params.temp_folder}/temp_R1.fastq {params.temp_folder}/temp_R2.fastq -threads {threads} -baseout {params.temp_folder}/{wildcards.sample}.fastq.gz {params.processing_options} 2> {log}
+        mv {params.temp_folder}/{wildcards.sample}*.fastq.gz 1000_processed_reads/{wildcards.sample}/reads/trimmomatic/
+        """
+
+rule mash:
+    params : kmer = 21,
+             hashes = 1000
+    input : "1000_processed_reads/{sample}/reads/trimmomatic/{sample}_1P.fastq.gz","1000_processed_reads/{sample}/reads/trimmomatic/{sample}_2P.fastq.gz"
+    output : "1000_processed_reads/{sample}/reads/mash/{sample}.msh"
+    log : "1000_processed_reads/{sample}/reads/mash/{sample}.log"
+    threads : THREADS
+    shell :
+        "mash sketch -r -p {threads} -k {params.kmer} -s {params.hashes} -o $(echo '{output}' | sed -e 's/.msh//') {input} > {log}"
+
+rule kaiju:
+    params : db_path = "/crex2/proj/sllstore2017039/2017_MG_course/data/kaijudb/kaiju_nr_db/",
+             db = "kaijudb.fmi"
+    input : "1000_processed_reads/{sample}/reads/trimmomatic/{sample}_1P.fastq.gz","1000_processed_reads/{sample}/reads/trimmomatic/{sample}_2P.fastq.gz"
+    output : "1000_processed_reads/{sample}/reads/kaiju/{sample}_kaiju.out.summary", "1000_processed_reads/{sample}/reads/kaiju/{sample}_kaiju.html"
+    log : "1000_processed_reads/{sample}/reads/kaiju/{sample}_kaiju.log"
+    threads : THREADS
+    shell : """
+    kaiju -t {params.db_path}/nodes.dmp -f {params.db_path}/{params.db}   -i 1000_processed_reads/{wildcards.sample}/reads/trimmomatic/{wildcards.sample}_1P.fastq.gz -j 1000_processed_reads/{wildcards.sample}/reads/trimmomatic/{wildcards.sample}_2P.fastq.gz -o 1000_processed_reads/{wildcards.sample}/reads/kaiju/{wildcards.sample}_kaiju.out -z {threads} > {log}
+    kaiju2krona -u -t {params.db_path}/nodes.dmp -n {params.db_path}/names.dmp -i 1000_processed_reads/{wildcards.sample}/reads/kaiju/{wildcards.sample}_kaiju.out -o 1000_processed_reads/{wildcards.sample}/reads/kaiju/{wildcards.sample}_kaiju.out.krona >> {log}
+    ktImportText  -o 1000_processed_reads/{wildcards.sample}/reads/kaiju/{wildcards.sample}_kaiju.html 1000_processed_reads/{wildcards.sample}/reads/kaiju/{wildcards.sample}_kaiju.out.krona >> {log}
+    kaijuReport -p -r genus -t {params.db_path}/nodes.dmp -n {params.db_path}/names.dmp -i 1000_processed_reads/{wildcards.sample}/reads/kaiju/{wildcards.sample}_kaiju.out -r family -o 1000_processed_reads/{wildcards.sample}/reads/kaiju/{wildcards.sample}_kaiju.out.summary >> {log}
+    """
+
+rule megahit_single:
+    params : temp_folder = TEMP_DIR
+    input : fwd = "1000_processed_reads/{sample}/reads/trimmomatic/{sample}_1P.fastq.gz",
+            rev = "1000_processed_reads/{sample}/reads/trimmomatic/{sample}_2P.fastq.gz",
+            u_rev = "1000_processed_reads/{sample}/reads/trimmomatic/{sample}_2U.fastq.gz",
+            u_fwd = "1000_processed_reads/{sample}/reads/trimmomatic/{sample}_1U.fastq.gz"
+    output : assembly = "1000_processed_reads/{sample}/assemblies/megahit/{sample}.fna",
+             folder = "1000_processed_reads/{sample}/assemblies/megahit/data"
+    threads : THREADS
+    shell : """
+        unpigz -c {input.fwd}  >  {params.temp_folder}/temp_R1.fastq
+        unpigz -c {input.rev}  >  {params.temp_folder}/temp_R2.fastq
+        unpigz -c {input.u_rev}  >  {params.temp_folder}/temp_U.fastq
+        unpigz -c {input.u_fwd}  >>  {params.temp_folder}/temp_U.fastq
+        megahit  -1 {params.temp_folder}/temp_R1.fastq -2 {params.temp_folder}/temp_R2.fastq -r {params.temp_folder}/temp_U.fastq -t {threads} -o {params.temp_folder}/temp_data --out-prefix megahit --continue
+        rm -r {params.temp_folder}/temp_data/intermediate_contigs/
+        mv {params.temp_folder}/temp_data/ {output.folder}
+        cp 1000_processed_reads/{wildcards.sample}/assemblies/megahit/data/megahit.contigs.fa {output.assembly}
+    """
+
+rule bbmap_index:
+    input : "1000_processed_reads/{sample}/assemblies/megahit/{sample}.fna"
+    output : "1000_processed_reads/{sample}/assemblies/megahit/mapping"
+    shell : """
+    bbmap.sh ref={input} path={output}
+    """
+
+rule bbmap_all_samples:
+    params : home = "/home/moritz/people/0010_Pauline/1000_processed_reads"
+    input : "1000_processed_reads/{sample}/assemblies/megahit/mapping"
+    output : "1000_processed_reads/{sample}/assemblies/megahit/mapping/map_table.tsv",
+    	     "1000_processed_reads/{sample}/assemblies/megahit/mapping/bams/"
+    threads : THREADS
+    shell : """
+        cd {params.home}/{wildcards.sample}/assemblies/megahit/mapping
+
+        for s in `echo """ + " ".join(all_samples()) + """ | tr ' ' "\n"`
+        do
+
+            base={params.home}/$s/reads/trimmomatic/$s
+            bbmap.sh  in=${{base}}_1P.fastq.gz in2=${{base}}_2P.fastq.gz threads={threads} bamscript=bamscript.sh out=bams/$s.sam
+            ./bamscript.sh
+
+            sambamba flagstat -t {threads} bams/${{s}}_sorted.bam > bams/${{s}}_sorted.stats
+            sambamba markdup --hash-table-size=4194304 --io-buffer-size=8000 --overflow-list-size=4194304 -r -t {threads}
+            samtools rmdup  bams/${{s}}_sorted.bam bams/$s.bam
+	    samtools index bams/$s.bam
+            sambamba flagstat  -t {threads} bams/${{s}}.bam > bams/${{s}}.stats
+
+           rm bams/*.sam
+           rm bams/*_sorted.bam*
+
+        done
+    jgi_summarize_bam_contig_depths --outputDepth map_table.tsv  --pairedContigs paired_contigs.tsv  bams/*.bam
+    rm bamscript.sh
+    rm bams/*.bam
+    """
+
+
+rule library:
+    input : #"1000_processed_reads/{sample}/reads/trimmomatic/{sample}_1P.fastq.gz",
+            "1000_processed_reads/{sample}/reads/mash/{sample}.msh",
+            "1000_processed_reads/{sample}/assemblies/megahit/mapping/map_table.tsv",
+	    "1000_processed_reads/{sample}/reads/kaiju/{sample}_kaiju.out.summary",
+    output : "1000_processed_reads/{sample}/done"
+    shell:
+        "touch 1000_processed_reads/{wildcards.sample}/done"
+
+
+rule all_libraries :
+    input : all_dones
+#    output : "1000_processed_reads/done"
+#    shell : "touch 1000_processed_reads/done"

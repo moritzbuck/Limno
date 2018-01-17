@@ -1,0 +1,23 @@
+\documentclass{article}
+\usepackage{amsmath}
+\usepackage{algorithm}
+\usepackage[noend]{algpseudocode}
+
+
+
+\begin{document}
+\begin{algorithm}
+\caption{Computing OGC similarity}\label{euclid}
+\begin{algorithmic}[1]
+\Function{similarity}{ogc1, ogc2}
+\State $\textit{genomes1} \gets \text{set of genomes containing }\textit{ogc1}$
+\State $\textit{genomes2} \gets \text{set of genomes containing }\textit{ogc2}$
+\State $\textit{similarity} \gets \left\vert\textit{genomes1} \cap \textit{genomes2}\right\vert$
+\State $\textit{normalisationFactor} \gets \text{min(}\left\vert\textit{genomes1}\right\vert,\left\vert\textit{genomes2}\right\vert)$
+
+\State \Return $\frac{\textit{similarity}}{\textit{normalisationFactor}}$
+
+\EndFunction
+\end{algorithmic}
+\end{algorithm}
+\end{document}
