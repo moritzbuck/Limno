@@ -19,6 +19,18 @@ family_file = file.path(input_tables,"otu_table.family.csv")
 raw_otus = read.table(table_file, sep=",", ,h=T, comment.char="|", row.names=1)
 raw_families = read.table(family_file, sep=",", ,h=T, comment.char="|", row.names=1)
 
+ott = t(raw_otus[,1:(ncol(raw_otus)-1)])
+curve = rarecurve(ott, step=300, label = FALSE)
+dev.copy(pdf, "rarefaction_otus.pdf")
+dev.off()
+
+otf = t(raw_families[,1:(ncol(raw_families)-1)])
+rarecurve(otf, step=300, label = FALSE)
+dev.copy(pdf, "rarefaction_fams.pdf")
+dev.off()
+rared_otus = rarefy(ott[rowSums(ott) > 7,], 1692)
+rared_families = rrarefy(otf[rowSums(otf) > 7,], 1692)
+
 metadata = read.table(metadata_file,sep=",", h=T,row.names=1)
 row.names(metadata) = paste("stubb", row.names(metadata), sep="")
 metadata$GPS.N = as.numeric(as.vector(metadata$GPS.N))
@@ -147,3 +159,91 @@ for(level in c("Kingdom","Phylum","Class","Order","Family","Genus","Species", "t
   tt = ddply(tt, .(taxa), colwise(sum))
   write.csv(tt, sprintf("../300_tables/hgca_tables/hgca_table.%s.csv", level))
 }
+
+
+rared_families = rared_families[!row.names(rared_families) %in% bad_samples,]
+öb = row.names(metadata[metadata$Name == "Strömsjöliden",])
+öb = öb [öb %in% row.names(rared_families)]
+
+mds=metaMDS(rared_families[öb,], try = 100, trymax=100)
+mds_points = mds$points
+mds_points = cbind(mds_points, metadata[row.names(mds_points),])
+
+bla = envfit(mds, metadata[row.names(mds_points),c("MeHg","Ratio.MeHg","Thg","Water","CN","CS", "Name")], na.rm = TRUE)
+arrows = as.data.frame(bla$vector$arrow)
+arrows = arrows*t(bla$vector$r)
+
+arrows2 = as.data.frame(bla$factors$centroids)
+
+arrows = rbind(arrows, arrows2)
+
+arrows$label = row.names(arrows)
+
+ggplot(mds_points, aes(MDS1, MDS2, col=Name, size=Ratio.MeHg))+geom_point()+geom_segment(data=arrows, aes(xend=NMDS1,yend=NMDS2), x=0, y=0, col="red", size=1) + geom_text(data=arrows, aes(x=NMDS1,y=NMDS2, label =label), col="black", size=8)
+
+
+anaeros = cbind(reads = rared_families[,"Anaerolineaceae"], metadata[row.names(rared_families),])
+ggplot(anaeros, aes(x=Ratio.MeHg, y=reads/1692, col=Name))+geom_point()+facet_wrap(~Name, scale="free_x")+ylab("relative abundance")+ggtitle("Anaerolineaceae")
+dev.copy(pdf,"anaeros.pdf", width=8, height=2.5)
+dev.off()
+
+anaeros = cbind(reads = rared_families[,"Syntrophobacteraceae"], metadata[row.names(rared_families),])
+ggplot(anaeros, aes(x=Ratio.MeHg, y=reads/1692, col=Name))+geom_point()+facet_wrap(~Name, scale="free_x")+ylab("relative abundance")+ggtitle("Syntrophobacteraceae")
+dev.copy(pdf,"syntrophos.pdf", width=8, height=2.5)
+dev.off()
+
+anaeros = cbind(reads = rared_families[,"Desulfobulbaceae"], metadata[row.names(rared_families),])
+ggplot(anaeros, aes(x=Ratio.MeHg, y=reads/1692, col=Name))+geom_point()+facet_wrap(~Name, scale="free_x")+ylab("relative abundance")+ggtitle("Desulfobulbaceae")
+dev.copy(pdf,"desulfos.pdf", width=8, height=2.5)
+dev.off()
+
+anaeros = cbind(reads = rared_families[,"Geobacteraceae"], metadata[row.names(rared_families),])
+ggplot(anaeros, aes(x=Ratio.MeHg, y=reads/1692, col=Name))+geom_point()+facet_wrap(~Name, scale="free_x")+ylab("relative abundance")+ggtitle("Geobacteraceae")
+dev.copy(pdf,"geos.pdf", width=8, height=2.5)
+dev.off()
+
+
+
+level = "Family"
+
+  tt = as.data.frame(t(raw_hgca_otus) )
+  tt$taxa = hgca_taxa_2[row.names(tt),level]
+  tt$taxa[tt$taxa== "" ] = NA
+  levels(tt$taxa) = c(levels(tt$taxa), "Unclassified")
+  tt$taxa[is.na(tt$taxa) ] = "Unclassified"
+  tt = ddply(tt, .(taxa), colwise(sum))
+
+ hgca_mds = metaMDS(t(tt[,2:ncol(tt)]), try = 100, trymax=100)
+ hgca_mds_points = hgca_mds$points
+ hgca_mds_points = cbind(hgca_mds_points, metadata[row.names(hgca_mds_points),])
+
+ bla = envfit(hgca_mds, metadata[row.names(hgca_mds_points),c("MeHg","Ratio.MeHg","Thg","Water","CN","CS", "Name")], na.rm = TRUE)
+ arrows = as.data.frame(bla$vector$arrow)
+ arrows = arrows*t(bla$vector$r)
+
+ arrows2 = as.data.frame(bla$factors$centroids)
+
+ arrows = rbind(arrows, arrows2)
+
+ arrows$label = row.names(arrows)
+
+ ggplot(hgca_mds_points, aes(MDS1, MDS2, col=Name, size=Ratio.MeHg))+geom_point()+geom_segment(data=arrows, aes(xend=NMDS1,yend=NMDS2), x=0, y=0, col="red", size=1) + geom_text(data=arrows, aes(x=NMDS1,y=NMDS2, label =label), col="black", size=8)
+
+tt2 = t(t(tt2)/colSums(tt2))
+anaeros = cbind(reads = tt2[tt$taxa == "Ruminococcaceae",], metadata[colnames(tt2),])
+
+ggplot(anaeros, aes(x=CS, y=reads, col=Name))+geom_point()+facet_wrap(~Name, scale="free_x")+ylab("relative abundance")+ggtitle("Ruminococcaceae")
+dev.copy(pdf,"ruminos_hgca.pdf", width=8, height=2.5)
+dev.off()
+
+anaeros = cbind(reads = tt2[tt$taxa == "Desulfuromonadaceae",], metadata[colnames(tt2),])
+
+ggplot(anaeros, aes(x=CS, y=reads, col=Name))+geom_point()+facet_wrap(~Name, scale="free_x")+ylab("relative abundance")+ggtitle("Desulfuromonadaceae")
+dev.copy(pdf,"desulfos_hgca.pdf", width=8, height=2.5)
+dev.off()
+
+anaeros = cbind(reads = tt2[tt$taxa == "Methanomassiliicoccaceae",], metadata[colnames(tt2),])
+
+ggplot(anaeros, aes(x=CS, y=reads, col=Name))+geom_point()+facet_wrap(~Name, scale="free_x")+ylab("relative abundance")+ggtitle("Methanomassiliicoccaceae")
+dev.copy(pdf,"methanomass_hgca.pdf", width=8, height=2.5)
+dev.off()

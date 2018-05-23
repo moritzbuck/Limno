@@ -12,6 +12,9 @@ COAS_FILES_DIR = '/home/moritz/people/0010_Pauline/0000_raws/0200_coasses/'
 TRIMMOMATIC_JAR_PROGRAM = "trimmomatic.jar"
 THREADS = 20
 MAX_MEM = '128g'
+sortrna_db  = ['rfam-5.8s-database-id98', 'rfam-5s-database-id98', 'silva-arc-16s-id95', 'silva-arc-23s-id98', 'silva-bac-16s-id90', 'silva-bac-23s-id98', 'silva-euk-18s-id95', 'silva-euk-28s-id98']
+sortrna_db_loc = '/sw/apps/bioinfo/SortMeRNA/2.1b/rackham/sortmerna'
+" ".join([ pjoin(sortrna_db_loc,'rRNA_databases',d+".fasta") + "," + pjoin(sortrna_db_loc,'index',d) for d in sortrna_db])
 
 trimmomatic_config = {
     	'options' : "-phred33",
@@ -54,7 +57,7 @@ def all_dones(wildcards):
 
 rule fastqc:
     input :  find_fastq
-    output : "1000_processed_reads/{sample}/reads/fastqc"
+    output : "1000_processed_reads/genomic/{sample}/reads/fastqc"
     threads : THREADS
     shell:
         """
@@ -107,6 +110,83 @@ rule kaiju:
     ktImportText  -o 1000_processed_reads/{wildcards.sample}/reads/kaiju/{wildcards.sample}_kaiju.html 1000_processed_reads/{wildcards.sample}/reads/kaiju/{wildcards.sample}_kaiju.out.krona >> {log}
     kaijuReport -p -r genus -t {params.db_path}/nodes.dmp -n {params.db_path}/names.dmp -i 1000_processed_reads/{wildcards.sample}/reads/kaiju/{wildcards.sample}_kaiju.out -r family -o 1000_processed_reads/{wildcards.sample}/reads/kaiju/{wildcards.sample}_kaiju.out.summary >> {log}
     """
+
+rule MAG_stats:
+    input : bin_id = "{path}/{name}/bins/{assembler}/MAGs/{bin_id}",
+            checkm = "{path}/{name}/bins/{assembler}/MAGs/{name}.checkm"
+    output : "{path}/{name}/bins/{assembler}/MAGs/{bin_id}/{bin_id}.stats"
+    run :
+        from bio import SeqIO
+
+        out_dict = {}
+        bin_path = input.bin_id
+        checkm_file = input.checkm
+        out_file = output[0]
+        bin_id = wildcards.bin_id
+        with open("phylophlan_tax.txt") as handle:
+            tax = [l.split()[:2] for l in handle.readlines()]
+            tax = {t[0] : ":".join([tt for tt in t[1].split(".") if "?" not in tt ]) for t in tax if "all_samples-" in t[0]}
+        def process_bin(binl) :
+            bin_path = binl
+            bin_id = binl
+            out_dict = {}
+
+            checkm_fields = ['Bin Id', 'Marker lineage', 'UID', '# genomes', '# markers', '# marker sets', '0', '1', '2', '3', '4', '5+', 'Completeness', 'Contamination', 'Strain heterogeneity']
+            with open(checkm_file) as handle:
+                dat = handle.readlines()
+            dat = {l.split()[0] : {k : v for k,v in zip(checkm_fields, l[:-1].split() ) } for l in dat[3:-1]}
+            checkm_dat = dat[bin_id]
+            out_dict['completeness'] = checkm_dat['Completeness']
+            out_dict['contamination'] = checkm_dat['Contamination']
+            out_dict['taxo:checkm'] = checkm_dat['Marker lineage']
+            out_dict['strain_heterogeneity'] = checkm_dat['Strain heterogeneity']
+
+            with open( bin_path + "/" + bin_id + ".fna") as handle:
+                fna = [s for s in SeqIO.parse(handle, "fasta")]
+            with open( bin_path + "/" + bin_id + ".faa") as handle:
+                faa = [s for s in SeqIO.parse(handle, "fasta")]
+
+            out_dict['length'] = sum([len(s.seq) for s in fna])
+            out_dict['nb_contigs'] = len(fna)
+            out_dict['nb_proteins'] = len(faa)
+            out_dict['coding_density'] = (3.0*sum([len(s.seq) for s in faa]))/sum([len(s.seq) for s in fna])
+            out_dict['GC'] = float(sum([str(s.seq).count("G")+str(s.seq).count("C") for s in fna]))/out_dict['length']
+            out_dict['taxo:phylophlan'] = tax[bin_id]
+            return out_dict
+
+        DataFrame.from_dict(dat, orient = 'index').to_csv("bin_stats.csv")
+
+# rule blast_db:
+#     input : "{path}/{name}/bins/{assembler}/MAGs/{bin_id}"
+#     output : "{path}/{name}/bins/{assembler}/MAGs/{bin_id}/{bin_id}_{db}.json"
+#     threads : THREADS
+#     run :
+#         from Bio import SeqIO
+#         import os
+#         from os.path import join as pjoin
+#         import pandas
+#         from pandas import Index
+#         from tqdm import tqdm
+#
+#         blast_line = 'tblastx -db ~/data/dbs/{db}/*.fna -query {fasta} -outfmt 6 -num_threads {threads} -out {blast_out}'
+#         head =['query', 'subject', 'identity', 'length', 'mismatch', 'gaps', 'qstart', 'qend', 'sstart','send','evalue','bitscore']
+#
+#         infasta = pjoin(input, wildcards.bin_id + ".ffn")
+#         db_path = "/home/moritz/data/dbs/{db}/".format(db = wildcards.db)
+#         tax_file = pjoin(db_path, "taxonomy.tsv")
+#         blastout = pjoin(input, wildcards.bin_id + "_" + wildcards.db + ".blast"
+#
+#         os.system(blast_line.format(db = wildcards.db, fasta = infasta, threads = threads, blast_out = blastout)
+#
+#         with open(tax_file) as handle:
+#             tax_dir = {l.split("\t")[0] : "".join(l[:-1].split("\t")[-2:]) for l in tqdm(handle)}
+#
+#         raw_data = pandas.read_csv(blastout, header = -1, index_col = False, sep="\t")
+#         raw_data.columns = Index(head)
+#
+#         with open(infasta) as handle:
+#             seqs = {s.id : s.seq for s in SeqIO.parse(handle,"fasta")}
+
 
 rule clean_MAGs:
     input : "{path}/{name}/bins/{assembler}/{name}"
@@ -213,6 +293,9 @@ rule bbmap_index:
     input : "{path}"
     output : folder = "{path}/mapping"
     shell : """
+    module load bioinfo-tools
+    module load bbmap
+
     genome=`ls {input}/*.fna`
     bbmap.sh ref=$genome path={wildcards.path}/mapping
     """
@@ -224,6 +307,10 @@ rule bbmap_all_samples:
     	     "{path}/mapping/bams/",
     threads : THREADS
     shell : """
+        module load bioinfo-tools
+        module load bbmap
+        module load samtools
+
         cd {wildcards.path}/mapping
 
         for s in `echo """ + " ".join(all_samples()) + """ | tr ' ' "\n"`
@@ -313,7 +400,7 @@ do
     echo ${{sample}}-${{bin_id}};
     if [ ! -f $DIR/${{sample}}-${{bin_id}}/${{sample}}-${{bin_id}}.faa ]
     then
-        #prokka --outdir $DIR/MAGs/${{sample}}-${{bin_id}}  --force --prefix ${{sample}}-${{bin_id}} --locustag ${{sample}}-${{bin_id}} --cpus {threads} $DIR/MAGs/$f 2> /dev/null ;
+        prokka --outdir $DIR/MAGs/${{sample}}-${{bin_id}}  --force --prefix ${{sample}}-${{bin_id}} --locustag ${{sample}}-${{bin_id}} --cpus {threads} $DIR/MAGs/$f 2> /dev/null ;
         echo bla
     fi
 done
@@ -350,6 +437,7 @@ rule library:
     output : "1000_processed_reads/{sample}/done"
     shell:
         "touch 1000_processed_reads/{wildcards.sample}/done"
+
 
 
 rule all_libraries :

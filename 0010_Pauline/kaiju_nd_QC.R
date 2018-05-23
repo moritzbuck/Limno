@@ -2,6 +2,8 @@ library(plyr)
 library(reshape2)
 library(ggplot2)
 library(vegan)
+library(ggrepel)
+library(dplyr)
 
 barstak = function(level, proportion = TRUE, filter = TRUE, cutoff=0.01){
 sub = ddply(kaiju_data[,c(samples,level)], c(level), colwise(sum))
@@ -106,3 +108,22 @@ full.md$fullmap[is.na(full.md$fullmap)] = 0
 full.md$binmap[is.na(full.md$binmap)] = 0
 
 full.md$eff.Mreads = full.md$Mreads*(1 - full.md$Dups/100)
+
+data = read.table("bin_stats.csv", sep=",", head=T)
+data$avg_prot_len = data$length*data$coding_density/data$nb_proteins
+ggplot(data, aes(label=X, x=avg_prot_len, col=completeness, y=length))+geom_point()+scale_y_log10()+geom_text_repel(data = filter(data, avg_prot_len < 500 | avg_prot_len >1500))
+
+
+
+nifH_data = read.table("nifHes.tsv", sep="\t", head=TRUE)
+nifH_data = nifH_data[,!grepl(".var",colnames(nifH_data))]
+melted.nifh = melt(nifH_data[,c(1,4:ncol(nifH_data))])
+melted.nifh$type = sapply(melted.nifh$stations, function(x) md[md$station == x,"type"][1])
+more_md = read.csv("../000_data/RNA_station_dat.csv", sep=",")
+to_clean = names(which(apply(more_md, 2, function(x) sum(grepl("±", x))) > 0))
+for(c in to_clean){
+  more_md[,c] = sapply(strsplit(more_md[,c]," "), function(x) as.numeric(x[1]))
+}
+row.names(more_md) = sapply(strsplit(more_md$Station.nr," "),tail,1)
+melted.nifh = cbind(melted.nifh,more_md[as.character(melted.nifh$stations),])
+ggplot(melted.nifh, aes(x=stations, y=value, col=contigName))+geom_point()+geom_line()+facet_grid(~type)

@@ -1,10 +1,10 @@
-base_path=/home/moritz/people/0002_stump
+base_path=/home/moritzbuck/people/0002_stump
 raws_folder=$base_path/000_data/020_reads/
 hgca_folder=~/uppmax/people/jingjing
-python_hjelper=$HOME/Dropbox/Documents/Uppsala/Limno/0002_stump/helper.py
+python_hjelper=$HOME/people/0002_stump/888_scripts/helper.py
 usearch=usearch9
 usearch_path=$base_path/200_usearch/
-nproc=11
+nproc=18
 
 mkdir $base_path
 cd  $base_path
@@ -72,14 +72,14 @@ vsearch --derep_fulllength $base_path/100_formated_data/all_qced_reads.fasta  -r
 $usearch -cluster_otus  $usearch_path/uniques_nosingletons.fa -otus $usearch_path/otus.fasta
 $usearch -usearch_global $base_path/100_formated_data/all_reads.fastq -db $usearch_path/otus.fasta -strand plus -id 0.97 -otutabout $usearch_path/otu_table.txt
 #$usearch -utax $usearch_path/otus.fasta -db ~/Data/utax/refdb_16.udb -utaxout $usearch_path/usearch_taxonomy.tax -strand both
-$usearch -sintax $usearch_path/otus.fasta -db ~/DataBases/utax/modified_SILVA_128_SSURef_Nr99_tax_silva_trunc.fasta -tabbedout $usearch_path/usearch.sintax -strand both -sintax_cutoff 0.8
+$usearch -sintax $usearch_path/otus.fasta -db ~/data/dbs/SILVA_132_LSURef_SSURef_Nr99.fasta  -tabbedout $usearch_path/usearch.sintax -strand both -sintax_cutoff 0.8
 
 ### UNOISE
 
 $usearch -unoise2 $usearch_path/uniques_nosingletons.fa -fastaout $usearch_path/unoise_otus.fasta -minampsize 4
 vsearch -usearch_global $base_path/100_formated_data/all_reads.fasta -db $usearch_path/unoise_otus.fasta -strand plus -id 0.97 -otutabout $usearch_path/unoise_otu_table.txt
 #$usearch -utax $usearch_path/unoise_otus.fasta -db ~/Data/utax/refdb_16.udb -utaxout $usearch_path/unoise_taxonomy.tax -strand both
-$usearch -sintax $usearch_path/unoise_otus.fasta -db ~/DataBases/utax/modified_SILVA_128_SSURef_Nr99_tax_silva_trunc.fasta -tabbedout $usearch_path/unoise.sintax -strand both -sintax_cutoff 0.8
+$usearch -sintax $usearch_path/unoise_otus.fasta -db ~/data/dbs/SILVA_132_LSURef_SSURef_Nr99.fasta  -tabbedout $usearch_path/unoise.sintax -strand both -sintax_cutoff 0.8
 
 ### generate tables:
 
